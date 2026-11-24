@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Cattle Face Verification</title>
+  <style>
+    * { box-sizing: border-box; font-family: system-ui, -apple-system, sans-serif; }
+    body { margin: 0; background: #111317; color: #e6e8ec; }
+    header { padding: 16px 24px; background: #181b22; border-bottom: 1px solid #2a2f3a; display: flex; justify-content: space-between; align-items: center; }
+    header h1 { margin: 0; font-size: 18px; font-weight: 600; }
+    .tabs { display: flex; gap: 8px; }
+    .tab-btn { padding: 8px 16px; border: 1px solid #323846; background: #1f242e; color: #c9d1d9; border-radius: 6px; cursor: pointer; font-size: 14px; }
+    .tab-btn.active { background: #2563eb; border-color: #2563eb; color: #fff; }
+    main { max-width: 1100px; margin: 24px auto; padding: 0 20px; }
+    .panel { display: none; }
+    .panel.active { display: block; }
+    .card { background: #181b22; border: 1px solid #2a2f3a; border-radius: 8px; padding: 20px; margin-bottom: 20px; }
+    h2 { margin-top: 0; font-size: 16px; }
+    .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+    input[type="text"], input[type="file"], select { padding: 8px 12px; background: #111317; border: 1px solid #323846; color: #e6e8ec; border-radius: 6px; font-size: 14px; }
+    button.primary { padding: 9px 18px; background: #2563eb; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; }
+    button.danger { padding: 6px 12px; background: #dc2626; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; }
+    button.secondary { padding: 9px 18px; background: #323846; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th, td { text-align: left; padding: 10px; border-bottom: 1px solid #2a2f3a; }
+    th { color: #9ca3af; font-weight: 500; }
+    .status-box { margin-top: 12px; padding: 12px; border-radius: 6px; background: #111317; border: 1px solid #2a2f3a; font-size: 13px; white-space: pre-wrap; }
+    .ok { color: #4ade80; }
+    .err { color: #f87171; }
+    #streamWrapper { width: 100%; background: #000; border-radius: 8px; overflow: hidden; min-height: 420px; display: flex; align-items: center; justify-content: center; border: 1px solid #2a2f3a; }
+    #videoFeed { width: 100%; max-height: 640px; object-fit: contain; display: none; }
+    .legend { display: flex; gap: 16px; font-size: 13px; color: #9ca3af; margin-top: 10px; }
+    .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Cattle Face Verification System</h1>
+    <div class="tabs">
+      <button class="tab-btn active" onclick="switchTab('enroll')">1. Enrollment</button>
+      <button class="tab-btn" onclick="switchTab('recognize')">2. Live Recognition</button>
+    </div>
+  </header>
+
+  <main>
+    <!-- ENROLLMENT TAB -->
+    <section id="tab-enroll" class="panel active">
+      <div class="card">
+        <h2>Enroll New Cow (3-5 Face Images)</h2>
+        <div class="row">
+          <input type="text" id="cowLabel" placeholder="Cow ID / Name (e.g., Cow_01)" style="min-width: 240px;" />
+          <input type="file" id="cowImages" accept="image/*" multiple />
+          <button class="primary" onclick="enrollCow()">Enroll Cow</button>
+        </div>
+        <div id="enrollStatus" class="status-box" style="display:none;"></div>
+      </div>
+
+      <div class="card">
+        <h2>Enrolled Gallery</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Label</th>
+              <th>Samples Used</th>
+              <th>Enrolled At (UTC)</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody id="cowTableBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- RECOGNITION TAB -->
+    <section id="tab-recognize" class="panel">
+      <div class="card">
+        <h2>Recognition Controls</h2>
+        <div class="row">
+          <select id="sourceType" onchange="toggleVideoInput()">
+            <option value="webcam">Webcam (Device 0)</option>
+            <option value="video">Uploaded Video File</option>
+          </select>
+          <input type="file" id="videoFile" accept="video/*" style="display:none;" />
+          <button class="primary" onclick="startStream()">Start Recognition</button>
+          <button class="secondary" onclick="stopStream()">Stop</button>
+
+          <label style="margin-left:auto; font-size:13px;">
+            Threshold (&tau;): <strong id="threshVal">0.55</strong>
+            <input type="range" id="threshSlider" min="0.30" max="0.90" step="0.01" value="0.55" oninput="updateThreshold(this.value)" />
+          </label>
+        </div>
+
+        <div id="streamWrapper">
+          <span id="streamPlaceholder" style="color:#6b7280;">Stream stopped. Select a source and click Start Recognition.</span>
+          <img id="videoFeed" alt="Live Recognition Feed" />
+        </div>
+
+        <div class="legend">
+          <span><span class="dot" style="background:#28c828;"></span>LOCKED (Verified)</span>
+          <span><span class="dot" style="background:#ffc800;"></span>VERIFYING (Voting)</span>
+          <span><span class="dot" style="background:#e62828;"></span>UNKNOWN (&lt; &tau;)</span>
+          <span><span class="dot" style="background:#a0a0a0;"></span>LOW QUALITY (Skipped)</span>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    function switchTab(tab) {
+      document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      document.getElementById('tab-' + tab).classList.add('active');
+      event.target.classList.add('active');
+      if (tab === 'enroll') loadCows();
+    }
+
+    async function loadCows() {
+      const res = await fetch('/api/cows');
+      const data = await res.json();
+      document.getElementById('threshSlider').value = data.threshold;
+      document.getElementById('threshVal').textContent = Number(data.threshold).toFixed(2);
+
+      const tbody = document.getElementById('cowTableBody');
+      tbody.innerHTML = '';
+      if (!data.cows.length) {
+        tbody.innerHTML = '<tr><td colspan="5" style="color:#6b7280;">No cows enrolled yet.</td></tr>';
+        return;
+      }
+      for (const cow of data.cows) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${cow.id}</td>
+          <td><strong>${cow.label}</strong></td>
+          <td>${cow.num_samples}</td>
+          <td>${cow.created_at.replace('T', ' ').slice(0, 19)}</td>
+          <td><button class="danger" onclick="deleteCow(${cow.id})">Delete</button></td>
+        `;
+        tbody.appendChild(tr);
+      }
+    }
+
+    async function enrollCow() {
+      const label = document.getElementById('cowLabel').value.trim();
+      const files = document.getElementById('cowImages').files;
+      const box = document.getElementById('enrollStatus');
+      box.style.display = 'block';
+
+      if (!label || files.length === 0) {
+        box.innerHTML = '<span class="err">Enter a cow label and select at least 3 images.</span>';
+        return;
+      }
+
+      const formData = new FormData();
+      formData.append('label', label);
+      for (const f of files) formData.append('files', f);
+
+      box.textContent = 'Running YOLO26n + Quality Gate + MobileFaceNet...';
+      const res = await fetch('/api/enroll', { method: 'POST', body: formData });
+      const data = await res.json();
+
+      let html = `<div class="${data.success ? 'ok' : 'err'}"><strong>${data.message}</strong></div>\n`;
+      for (const d of data.details || []) {
+        html += `<div class="${d.accepted ? 'ok' : 'err'}">[${d.accepted ? 'PASS' : 'FAIL'}] ${d.file}: ${d.reason}</div>`;
+      }
+      box.innerHTML = html;
+
+      if (data.success) {
+        document.getElementById('cowLabel').value = '';
+        document.getElementById('cowImages').value = '';
+        loadCows();
+      }
+    }
+
+    async function deleteCow(id) {
+      await fetch(`/api/cows/${id}`, { method: 'DELETE' });
+      loadCows();
+    }
+
+    function toggleVideoInput() {
+      const type = document.getElementById('sourceType').value;
+      document.getElementById('videoFile').style.display = (type === 'video') ? 'inline-block' : 'none';
+    }
+
+    async function startStream() {
+      const type = document.getElementById('sourceType').value;
+      const img = document.getElementById('videoFeed');
+      const placeholder = document.getElementById('streamPlaceholder');
+
+      let url = `/api/stream?source=${type}&t=${Date.now()}`;
+
+      if (type === 'video') {
+        const fileInput = document.getElementById('videoFile');
+        if (!fileInput.files.length) {
+          alert('Select a video file first.');
+          return;
+        }
+        placeholder.textContent = 'Uploading video...';
+        const fd = new FormData();
+        fd.append('file', fileInput.files[0]);
+        const res = await fetch('/api/upload_video', { method: 'POST', body: fd });
+        const data = await res.json();
+        url += `&filename=${encodeURIComponent(data.filename)}`;
+      }
+
+      placeholder.style.display = 'none';
+      img.style.display = 'block';
+      img.src = url;
+    }
+
+    function stopStream() {
+      const img = document.getElementById('videoFeed');
+      const placeholder = document.getElementById('streamPlaceholder');
+      img.src = '';
+      img.style.display = 'none';
+      placeholder.style.display = 'block';
+      placeholder.textContent = 'Stream stopped.';
+    }
+
+    async function updateThreshold(val) {
+      document.getElementById('threshVal').textContent = Number(val).toFixed(2);
+      await fetch(`/api/threshold?value=${val}`, { method: 'POST' });
+    }
+
+    loadCows();
+  </script>
+</body>
+</html>

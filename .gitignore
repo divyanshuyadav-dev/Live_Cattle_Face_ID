@@ -1,0 +1,9 @@
+
+*.db
+*.mp4
+*webp
+*.jpg
+>jpeg
+
+*.pt
+*.pth
